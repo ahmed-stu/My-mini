@@ -7,6 +7,7 @@ using UnityEngine;
 /// </summary>
 public class CastingState : FishingRodBaseState
 {
+    
     private float castDuration = 1.0f; // مدة الرسوم المتحركة للرمي
     private float castTimer;
 

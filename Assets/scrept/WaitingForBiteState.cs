@@ -18,7 +18,7 @@ public class WaitingForBiteState : FishingRodBaseState
         Debug.Log("Entering WaitingForBite State");
 
         // بدء مؤقت اللدغة في العوامة
-        fishingRodController.bobberInstance.StartBiteTimer();
+        fishingRodController.bobberInstance.ResetBiteTimer();
 
         // الاشتراك في حدث لدغة السمكة
         FishingEvents.OnFishBite += OnFishBite;

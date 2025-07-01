@@ -1,80 +1,142 @@
+
 // FishAI.cs
 
 using UnityEngine;
 
 /// <summary>
-/// يتحكم بحركة السمكة في البيئة بشكل عشوائي ضمن حدود محددة.
+/// يتحكم بحركة السمكة: تتجول بشكل عشوائي وعند اكتشاف الطُعم تتبعه بسلاسة.
 /// </summary>
 public class FishAI : MonoBehaviour
 {
-    [Header("Speed Settings")]
-    [Tooltip("أقل سرعة للسمكة")]
-    [SerializeField] private float minSpeed = 1f;
-    [Tooltip("أعلى سرعة للسمكة")]
-    [SerializeField] private float maxSpeed = 3f;
-
+    #region Settings
     [Header("Movement Settings")]
-    [Tooltip("الفترة الزمنية قبل تغيير الاتجاه")]
+    [Tooltip("السرعة الدنيا للسمكة أثناء التجوال")]
+    [SerializeField] private float minSpeed = 1f;
+    [Tooltip("السرعة العليا للسمكة أثناء التجوال")]
+    [SerializeField] private float maxSpeed = 3f;
+    [Tooltip("سرعة الدوران لتوجيه السمكة نحو الوجهة")]
+    [SerializeField] private float rotationSpeed = 2f;
+
+    [Header("Wander Settings")]
+    [Tooltip("المسافة الأفقية لمنطقة التجوال")]
+    [SerializeField] private float swimLimit = 10f;
+    [Tooltip("الفاصل الزمني لتغيير الوجهة العشوائية")]
     [SerializeField] private float changeDirectionInterval = 3f;
-    [Tooltip("حدود منطقة السباحة (مساوية في المحاور X, Y, Z)")]
-    [SerializeField] private float swimLimits = 10f;
 
-    private Vector3 targetPosition;      // الوجهة الحالية للسمكة
-    private float currentSpeed;          // السرعة الحالية للسمكة
-    private float directionChangeTimer;  // مؤقت تغيير الاتجاه
+    [Header("Bait Follow Settings")]
+    [Tooltip("نصف قطر اكتشاف الطُعم")]
+    [SerializeField] private float baitDetectionRadius = 5f;
+    [Tooltip("مضاعف السرعة عند اتباع الطُعم")]
+    [SerializeField] private float followSpeedMultiplier = 1.5f;
+    [Tooltip("المسافة التي تكون عندها السمكة قريبة كفاية")]
+    [SerializeField] private float approachDistance = 0.5f;
 
+    [Header("Speed Smoothing")]
+    [Tooltip("معدل تنعيم التغيير في السرعة")]
+    [SerializeField] private float speedDamping = 2f;
+    #endregion
+
+    #region State
+    private Vector3 wanderTarget;
+    private float currentSpeed;
+    private float baseSpeed;
+    private float directionTimer;
+
+    private Bobber currentBobber;
+    #endregion
+
+    #region Unity Methods
     private void Start()
     {
-        // تهيئة الوجهة والسرعة والموقت
-        SetNewTargetPosition();
-        currentSpeed = Random.Range(minSpeed, maxSpeed);
-        directionChangeTimer = changeDirectionInterval;
+        SetNewWanderTarget();
+        directionTimer = changeDirectionInterval;
+        baseSpeed = Random.Range(minSpeed, maxSpeed);
+        currentSpeed = baseSpeed;
     }
 
     private void Update()
     {
-        MoveFish();  // تحريك السمكة نحو الوجهة
+        AcquireBobberReference();
+        if (currentBobber != null && Vector3.Distance(transform.position, currentBobber.transform.position) <= baitDetectionRadius)
+            FollowBait();
+        else
+            Wander();
 
-        // تحديث المؤقت، وعند انتهاءه نغير الوجهة
-        directionChangeTimer -= Time.deltaTime;
-        if (directionChangeTimer <= 0f)
+        ConstrainVerticalPosition();
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        // عرض نصف قطر اكتشاف الطُعم
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireSphere(transform.position, baitDetectionRadius);
+    }
+    #endregion
+
+    #region Behavior
+    private void Wander()
+    {
+        // تغيير الوجهة بعد انقضاء المؤقت
+        directionTimer -= Time.deltaTime;
+        if (directionTimer <= 0f)
         {
-            SetNewTargetPosition();
-            directionChangeTimer = changeDirectionInterval;
+            SetNewWanderTarget();
+            directionTimer = changeDirectionInterval;
+            baseSpeed = Random.Range(minSpeed, maxSpeed);
+        }
+
+        MoveTowards(wanderTarget, baseSpeed);
+    }
+
+    private void FollowBait()
+    {
+        Vector3 baitPos = currentBobber.transform.position;
+        float distance = Vector3.Distance(transform.position, baitPos);
+
+        float targetSpeed = (distance < approachDistance) ? 0f : baseSpeed * followSpeedMultiplier;
+        currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * speedDamping);
+
+        MoveTowards(baitPos, currentSpeed);
+    }
+    #endregion
+
+    #region Helpers
+    private void MoveTowards(Vector3 destination, float speed)
+    {
+        // حركة خطية
+        transform.position = Vector3.MoveTowards(transform.position, destination, speed * Time.deltaTime);
+
+        // تدوير نحو الوجهة
+        Vector3 dir = (destination - transform.position).normalized;
+        if (dir != Vector3.zero)
+        {
+            Quaternion targetRot = Quaternion.LookRotation(dir);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationSpeed * Time.deltaTime);
         }
     }
 
-    /// <summary>
-    /// ينقل السمكة تدريجيًا نحو الوجهة المحددة.
-    /// </summary>
-    private void MoveFish()
+    private void SetNewWanderTarget()
     {
-        transform.position = Vector3.MoveTowards(
-            transform.position,
-            targetPosition,
-            currentSpeed * Time.deltaTime
-        );
-
-        // إذا وصلنا قريبًا جدًا من الوجهة، نختار وجهة جديدة
-        if (Vector3.Distance(transform.position, targetPosition) < 0.1f)
-        {
-            SetNewTargetPosition();
-        }
-    }
-
-    /// <summary>
-    /// يحدد وجهة عشوائية جديدة ضمن حدود السباحة.
-    /// </summary>
-    private void SetNewTargetPosition()
-    {
-        targetPosition = new Vector3(
-            Random.Range(-swimLimits, swimLimits),
-            Random.Range(-swimLimits, swimLimits),
-            Random.Range(-swimLimits, swimLimits)
+        wanderTarget = new Vector3(
+            Random.Range(-swimLimit, swimLimit),
+            transform.position.y,
+            Random.Range(-swimLimit, swimLimit)
         );
     }
 
-    // ملاحظة:
-    // إذا رغبت في جعل السمكة تلاحق العوامة عند قربها:
-    // تحقق من مسافة العوامة وأعد توجيه targetPosition نحو موقع العوامة.
+    private void ConstrainVerticalPosition()
+    {
+        // احتفظ بمستوى الماء y=0 أو أي قيمة ترغب
+        Vector3 pos = transform.position;
+        pos.y = Mathf.Clamp(pos.y, -Mathf.Abs(transform.position.y), 0f);
+        transform.position = pos;
+    }
+
+    private void AcquireBobberReference()
+    {
+        if (currentBobber == null)
+            currentBobber = FindAnyObjectByType<Bobber>();
+    }
+    #endregion
 }
+
