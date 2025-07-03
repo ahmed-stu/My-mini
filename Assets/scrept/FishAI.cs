@@ -1,142 +1,167 @@
-
+// ## REALISM UPDATE ##
 // FishAI.cs
 
 using UnityEngine;
+using System.Collections;
 
-/// <summary>
-/// يتحكم بحركة السمكة: تتجول بشكل عشوائي وعند اكتشاف الطُعم تتبعه بسلاسة.
-/// </summary>
+[RequireComponent(typeof(Rigidbody))]
 public class FishAI : MonoBehaviour
 {
-    #region Settings
     [Header("Movement Settings")]
-    [Tooltip("السرعة الدنيا للسمكة أثناء التجوال")]
-    [SerializeField] private float minSpeed = 1f;
-    [Tooltip("السرعة العليا للسمكة أثناء التجوال")]
-    [SerializeField] private float maxSpeed = 3f;
-    [Tooltip("سرعة الدوران لتوجيه السمكة نحو الوجهة")]
-    [SerializeField] private float rotationSpeed = 2f;
+    [SerializeField] private float moveSpeed = 4f;
+    [SerializeField] private float rotationSpeed = 3f;
+    [SerializeField] private float movementSmoothing = 0.5f;
 
     [Header("Wander Settings")]
-    [Tooltip("المسافة الأفقية لمنطقة التجوال")]
-    [SerializeField] private float swimLimit = 10f;
-    [Tooltip("الفاصل الزمني لتغيير الوجهة العشوائية")]
-    [SerializeField] private float changeDirectionInterval = 3f;
+    [SerializeField] private Vector3 wanderAreaCenter = Vector3.zero;
+    [SerializeField] private Vector3 wanderAreaSize = new Vector3(30, 8, 30);
+    [SerializeField] private float waterSurfaceY = 0f;
 
-    [Header("Bait Follow Settings")]
-    [Tooltip("نصف قطر اكتشاف الطُعم")]
-    [SerializeField] private float baitDetectionRadius = 5f;
-    [Tooltip("مضاعف السرعة عند اتباع الطُعم")]
-    [SerializeField] private float followSpeedMultiplier = 1.5f;
-    [Tooltip("المسافة التي تكون عندها السمكة قريبة كفاية")]
-    [SerializeField] private float approachDistance = 0.5f;
+    [Header("Bait Interaction")]
+    [SerializeField] private float baitDetectionRadius = 8f;
+    [SerializeField] private float minDistanceToRod = 2.0f;
+    [SerializeField] private float biteDistance = 1.0f;
+    [SerializeField] private float timeBeforeBite = 1.0f;
+    [SerializeField] private GameObject biteIndicatorPrefab;
 
-    [Header("Speed Smoothing")]
-    [Tooltip("معدل تنعيم التغيير في السرعة")]
-    [SerializeField] private float speedDamping = 2f;
-    #endregion
-
-    #region State
+    [Header("Fight Settings")]
+    [SerializeField] private float fishFightPullForce = 20f;
+    
+    private Vector3 targetPosition;
+    private Rigidbody rb;
+    private FishingRodController fishingRodController;
+    private enum FishState { Wandering, FollowingBait, Biting, Fighting, Cooldown }
+    private FishState currentState;
+    private Vector3 velocityRef = Vector3.zero;
     private Vector3 wanderTarget;
-    private float currentSpeed;
-    private float baseSpeed;
-    private float directionTimer;
+    private bool isAiDisabled = false;
 
-    private Bobber currentBobber;
-    #endregion
+    private void Awake()
+    {
+        rb = GetComponent<Rigidbody>();
+        rb.useGravity = false;
+        wanderAreaSize = new Vector3(Mathf.Abs(wanderAreaSize.x), Mathf.Abs(wanderAreaSize.y), Mathf.Abs(wanderAreaSize.z));
+    }
 
-    #region Unity Methods
     private void Start()
     {
-        SetNewWanderTarget();
-        directionTimer = changeDirectionInterval;
-        baseSpeed = Random.Range(minSpeed, maxSpeed);
-        currentSpeed = baseSpeed;
+        fishingRodController = FindObjectOfType<FishingRodController>();
+        if (fishingRodController == null) { enabled = false; return; }
+        SetState(FishState.Wandering);
     }
-
-    private void Update()
+    
+    private void FixedUpdate()
     {
-        AcquireBobberReference();
-        if (currentBobber != null && Vector3.Distance(transform.position, currentBobber.transform.position) <= baitDetectionRadius)
-            FollowBait();
+        if (isAiDisabled) return; // If AI is disabled, do nothing
+
+        if (currentState == FishState.Fighting)
+        {
+            FightBehavior();
+        }
         else
-            Wander();
-
-        ConstrainVerticalPosition();
-    }
-
-    private void OnDrawGizmosSelected()
-    {
-        // عرض نصف قطر اكتشاف الطُعم
-        Gizmos.color = Color.green;
-        Gizmos.DrawWireSphere(transform.position, baitDetectionRadius);
-    }
-    #endregion
-
-    #region Behavior
-    private void Wander()
-    {
-        // تغيير الوجهة بعد انقضاء المؤقت
-        directionTimer -= Time.deltaTime;
-        if (directionTimer <= 0f)
         {
-            SetNewWanderTarget();
-            directionTimer = changeDirectionInterval;
-            baseSpeed = Random.Range(minSpeed, maxSpeed);
+            UpdateTargetPosition();
+            ApplyStableMovement();
         }
-
-        MoveTowards(wanderTarget, baseSpeed);
+        
+        ClampPositionToWater();
     }
-
-    private void FollowBait()
+    
+    private void SetState(FishState newState)
     {
-        Vector3 baitPos = currentBobber.transform.position;
-        float distance = Vector3.Distance(transform.position, baitPos);
-
-        float targetSpeed = (distance < approachDistance) ? 0f : baseSpeed * followSpeedMultiplier;
-        currentSpeed = Mathf.Lerp(currentSpeed, targetSpeed, Time.deltaTime * speedDamping);
-
-        MoveTowards(baitPos, currentSpeed);
-    }
-    #endregion
-
-    #region Helpers
-    private void MoveTowards(Vector3 destination, float speed)
-    {
-        // حركة خطية
-        transform.position = Vector3.MoveTowards(transform.position, destination, speed * Time.deltaTime);
-
-        // تدوير نحو الوجهة
-        Vector3 dir = (destination - transform.position).normalized;
-        if (dir != Vector3.zero)
+        if (currentState == newState) return;
+        currentState = newState;
+        switch (currentState)
         {
-            Quaternion targetRot = Quaternion.LookRotation(dir);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationSpeed * Time.deltaTime);
+            case FishState.Wandering: SetNewWanderTarget(); break;
+            case FishState.Biting: rb.linearVelocity = Vector3.zero; StartCoroutine(BiteCoroutine()); break;
+            case FishState.Cooldown: StartCoroutine(CooldownCoroutine()); break;
         }
     }
 
-    private void SetNewWanderTarget()
+    private void UpdateTargetPosition()
     {
-        wanderTarget = new Vector3(
-            Random.Range(-swimLimit, swimLimit),
-            transform.position.y,
-            Random.Range(-swimLimit, swimLimit)
-        );
+        bool isBobberReady = fishingRodController.CurrentState == FishingRodController.FishingState.WaitingForBite;
+
+        if (currentState == FishState.Wandering && isBobberReady && fishingRodController.bobberInstance != null)
+        {
+            Transform bobberTransform = fishingRodController.bobberInstance.transform;
+            float distanceToBobber = Vector3.Distance(transform.position, bobberTransform.position);
+            float distanceOfBobberFromRod = Vector3.Distance(bobberTransform.position, fishingRodController.rodTipTransform.position);
+            if (distanceToBobber <= baitDetectionRadius && distanceOfBobberFromRod > minDistanceToRod)
+            {
+                SetState(FishState.FollowingBait);
+            }
+        }
+        
+        if (currentState == FishState.FollowingBait)
+        {
+             if (!isBobberReady || fishingRodController.bobberInstance == null)
+             {
+                SetState(FishState.Wandering);
+                return;
+             }
+             targetPosition = fishingRodController.bobberInstance.transform.position;
+             if (Vector3.Distance(transform.position, targetPosition) < biteDistance) SetState(FishState.Biting);
+        }
+        else { targetPosition = wanderTarget; if (Vector3.Distance(transform.position, wanderTarget) < 2.5f) SetNewWanderTarget(); }
     }
 
-    private void ConstrainVerticalPosition()
+    private void ApplyStableMovement()
     {
-        // احتفظ بمستوى الماء y=0 أو أي قيمة ترغب
-        Vector3 pos = transform.position;
-        pos.y = Mathf.Clamp(pos.y, -Mathf.Abs(transform.position.y), 0f);
-        transform.position = pos;
+        Vector3 clampedTarget = new Vector3(targetPosition.x, Mathf.Min(targetPosition.y, waterSurfaceY - 0.5f), targetPosition.z);
+        rb.position = Vector3.SmoothDamp(rb.position, clampedTarget, ref velocityRef, movementSmoothing, moveSpeed);
+        if (velocityRef.sqrMagnitude > 0.01f)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(velocityRef);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.fixedDeltaTime * rotationSpeed);
+        }
     }
 
-    private void AcquireBobberReference()
+    private void ClampPositionToWater() { if (transform.position.y > waterSurfaceY) { transform.position = new Vector3(transform.position.x, waterSurfaceY, transform.position.z); } }
+    private void SetNewWanderTarget() { float x = Random.Range(-wanderAreaSize.x / 2, wanderAreaSize.x / 2) + wanderAreaCenter.x; float y = Random.Range(waterSurfaceY - wanderAreaSize.y, waterSurfaceY - 1f); float z = Random.Range(-wanderAreaSize.z / 2, wanderAreaSize.z / 2) + wanderAreaCenter.z; wanderTarget = new Vector3(x, y, z); }
+    private IEnumerator BiteCoroutine() { GameObject indicator = null; if (biteIndicatorPrefab != null) indicator = Instantiate(biteIndicatorPrefab, transform.position + Vector3.up * 1.5f, Quaternion.identity); yield return new WaitForSeconds(timeBeforeBite); if (indicator != null) Destroy(indicator); if(fishingRodController.CurrentState == FishingRodController.FishingState.WaitingForBite) { fishingRodController.StartFishFight(this); SetState(FishState.Fighting); } else { SetState(FishState.Wandering); } }
+    
+    private void FightBehavior() 
     {
-        if (currentBobber == null)
-            currentBobber = FindAnyObjectByType<Bobber>();
+        if (fishingRodController == null) return;
+        Transform rodTip = fishingRodController.rodTipTransform;
+        float maxDistance = fishingRodController.maxLineLength;
+        float distanceToRod = Vector3.Distance(transform.position, rodTip.position);
+
+        if (distanceToRod < maxDistance)
+        {
+            Vector3 fromRodToFish = transform.position - rodTip.position;
+            fromRodToFish.y = 0;
+            Vector3 resistanceDirection = (fromRodToFish.normalized + (Vector3.down * 0.2f)).normalized;
+            rb.AddForce(resistanceDirection * fishFightPullForce, ForceMode.Acceleration);
+        }
+        
+        if (distanceToRod > maxDistance)
+        {
+            Vector3 direction = (transform.position - rodTip.position).normalized;
+            transform.position = rodTip.position + direction * maxDistance;
+            rb.linearVelocity *= 0.5f;
+        }
+
+        if (rb.linearVelocity.sqrMagnitude > 0.1f)
+        {
+            Quaternion targetRot = Quaternion.LookRotation(rb.linearVelocity.normalized);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, rotationSpeed * Time.fixedDeltaTime);
+        }
     }
-    #endregion
+
+    private IEnumerator CooldownCoroutine() { yield return new WaitForSeconds(3f); SetState(FishState.Wandering); }
+    
+    public void ResetFishState() { StopAllCoroutines(); rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero; SetState(FishState.Wandering); }
+    
+    // This function will be called to stop the fish from moving on its own
+    public void DisableAI(bool isDisabled)
+    {
+        isAiDisabled = isDisabled;
+        if(isDisabled)
+        {
+            rb.isKinematic = true;
+        }
+    }
 }
-

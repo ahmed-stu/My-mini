@@ -150,6 +150,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: affd170c4bdd33440809e4869e648c6b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  buoyancyMultiplier: 2
+  waterDrag: 5
+  waterAngularDrag: 5
 --- !u!23 &6010680341355679396
 MeshRenderer:
   m_ObjectHideFlags: 0
