@@ -30,11 +30,10 @@ public class FishAI : MonoBehaviour
     private Vector3 targetPosition;
     private Rigidbody rb;
     private FishingRodController fishingRodController;
-    private enum FishState { Wandering, FollowingBait, Biting, Fighting, Cooldown }
+    private enum FishState { Wandering, FollowingBait, Biting, Fighting, Cooldown, Disabled }
     private FishState currentState;
     private Vector3 velocityRef = Vector3.zero;
     private Vector3 wanderTarget;
-    private bool isAiDisabled = false;
 
     private void Awake()
     {
@@ -52,13 +51,11 @@ public class FishAI : MonoBehaviour
     
     private void FixedUpdate()
     {
-        if (isAiDisabled) return; // If AI is disabled, do nothing
-
         if (currentState == FishState.Fighting)
         {
             FightBehavior();
         }
-        else
+        else if (currentState != FishState.Disabled && currentState != FishState.Biting)
         {
             UpdateTargetPosition();
             ApplyStableMovement();
@@ -73,9 +70,20 @@ public class FishAI : MonoBehaviour
         currentState = newState;
         switch (currentState)
         {
-            case FishState.Wandering: SetNewWanderTarget(); break;
-            case FishState.Biting: rb.linearVelocity = Vector3.zero; StartCoroutine(BiteCoroutine()); break;
-            case FishState.Cooldown: StartCoroutine(CooldownCoroutine()); break;
+            case FishState.Wandering: 
+                DisableAI(false); // Make sure AI is enabled when wandering
+                SetNewWanderTarget(); 
+                break;
+            case FishState.Biting: 
+                rb.linearVelocity = Vector3.zero; 
+                StartCoroutine(BiteCoroutine()); 
+                break;
+            case FishState.Cooldown: 
+                StartCoroutine(CooldownCoroutine()); 
+                break;
+            case FishState.Disabled:
+                rb.isKinematic = true;
+                break;
         }
     }
 
@@ -96,11 +104,7 @@ public class FishAI : MonoBehaviour
         
         if (currentState == FishState.FollowingBait)
         {
-             if (!isBobberReady || fishingRodController.bobberInstance == null)
-             {
-                SetState(FishState.Wandering);
-                return;
-             }
+             if (!isBobberReady || fishingRodController.bobberInstance == null) { SetState(FishState.Wandering); return; }
              targetPosition = fishingRodController.bobberInstance.transform.position;
              if (Vector3.Distance(transform.position, targetPosition) < biteDistance) SetState(FishState.Biting);
         }
@@ -152,16 +156,18 @@ public class FishAI : MonoBehaviour
     }
 
     private IEnumerator CooldownCoroutine() { yield return new WaitForSeconds(3f); SetState(FishState.Wandering); }
-    
     public void ResetFishState() { StopAllCoroutines(); rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero; SetState(FishState.Wandering); }
     
-    // This function will be called to stop the fish from moving on its own
     public void DisableAI(bool isDisabled)
     {
-        isAiDisabled = isDisabled;
         if(isDisabled)
         {
-            rb.isKinematic = true;
+            SetState(FishState.Disabled);
+        }
+        else
+        {
+            rb.isKinematic = false;
+            SetState(FishState.Wandering);
         }
     }
 }

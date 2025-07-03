@@ -1945,6 +1945,7 @@ MonoBehaviour:
   bobberSplashEffect: {fileID: 2309882438395215835, guid: 6cfe32b4d627f8047bc5c0935dd79de4, type: 3}
   bobberSplashSound: {fileID: 8300000, guid: 624b3518d906b0e43bec66dfe3fc4080, type: 3}
   lineTensionSound: {fileID: 8300000, guid: 15bce8f2eaf5c664bafbbc3ec9653fac, type: 3}
+  lineSnapSound: {fileID: 8300000, guid: b7054f7f6c540ad4e8dd06c1eecbdd34, type: 3}
   fishCaughtSound: {fileID: 8300000, guid: 4a66318365011c04b94f440d0cfb3a49, type: 3}
   waterSurfaceY: -5.03
   maxLineLength: 30
