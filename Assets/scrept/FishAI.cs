@@ -1,4 +1,4 @@
-// ## REALISM UPDATE ##
+// ## FINAL SCRIPT ##
 // FishAI.cs
 
 using UnityEngine;
@@ -7,31 +7,31 @@ using System.Collections;
 [RequireComponent(typeof(Rigidbody))]
 public class FishAI : MonoBehaviour
 {
+    [Header("Fish Data Card")]
+    [Tooltip("Assign the ScriptableObject that defines this fish's properties.")]
+    [SerializeField] private FishData fishData;
+
     [Header("Movement Settings")]
-    [SerializeField] private float moveSpeed = 4f;
     [SerializeField] private float rotationSpeed = 3f;
     [SerializeField] private float movementSmoothing = 0.5f;
 
     [Header("Wander Settings")]
     [SerializeField] private Vector3 wanderAreaCenter = Vector3.zero;
     [SerializeField] private Vector3 wanderAreaSize = new Vector3(30, 8, 30);
-    [SerializeField] private float waterSurfaceY = 0f;
-
+    
     [Header("Bait Interaction")]
     [SerializeField] private float baitDetectionRadius = 8f;
     [SerializeField] private float minDistanceToRod = 2.0f;
     [SerializeField] private float biteDistance = 1.0f;
     [SerializeField] private float timeBeforeBite = 1.0f;
     [SerializeField] private GameObject biteIndicatorPrefab;
-
-    [Header("Fight Settings")]
-    [SerializeField] private float fishFightPullForce = 20f;
     
-    private Vector3 targetPosition;
     private Rigidbody rb;
     private FishingRodController fishingRodController;
     private enum FishState { Wandering, FollowingBait, Biting, Fighting, Cooldown, Disabled }
     private FishState currentState;
+    
+    private Vector3 targetPosition;
     private Vector3 velocityRef = Vector3.zero;
     private Vector3 wanderTarget;
 
@@ -45,7 +45,14 @@ public class FishAI : MonoBehaviour
     private void Start()
     {
         fishingRodController = FindObjectOfType<FishingRodController>();
-        if (fishingRodController == null) { enabled = false; return; }
+        if (fishingRodController == null || fishData == null) 
+        { 
+            Debug.LogError($"Fish {gameObject.name} is missing its FishingRodController or FishData reference!");
+            enabled = false; 
+            return; 
+        }
+        
+        transform.localScale = Vector3.one * fishData.modelScale;
         SetState(FishState.Wandering);
     }
     
@@ -61,7 +68,10 @@ public class FishAI : MonoBehaviour
             ApplyStableMovement();
         }
         
-        ClampPositionToWater();
+        if (transform.position.y > fishingRodController.waterSurfaceY)
+        {
+            transform.position = new Vector3(transform.position.x, fishingRodController.waterSurfaceY, transform.position.z);
+        }
     }
     
     private void SetState(FishState newState)
@@ -71,7 +81,7 @@ public class FishAI : MonoBehaviour
         switch (currentState)
         {
             case FishState.Wandering: 
-                DisableAI(false); // Make sure AI is enabled when wandering
+                DisableAI(false);
                 SetNewWanderTarget(); 
                 break;
             case FishState.Biting: 
@@ -113,8 +123,8 @@ public class FishAI : MonoBehaviour
 
     private void ApplyStableMovement()
     {
-        Vector3 clampedTarget = new Vector3(targetPosition.x, Mathf.Min(targetPosition.y, waterSurfaceY - 0.5f), targetPosition.z);
-        rb.position = Vector3.SmoothDamp(rb.position, clampedTarget, ref velocityRef, movementSmoothing, moveSpeed);
+        Vector3 clampedTarget = new Vector3(targetPosition.x, Mathf.Min(targetPosition.y, fishingRodController.waterSurfaceY - 0.5f), targetPosition.z);
+        rb.position = Vector3.SmoothDamp(rb.position, clampedTarget, ref velocityRef, movementSmoothing, fishData.moveSpeed);
         if (velocityRef.sqrMagnitude > 0.01f)
         {
             Quaternion targetRotation = Quaternion.LookRotation(velocityRef);
@@ -122,9 +132,23 @@ public class FishAI : MonoBehaviour
         }
     }
 
-    private void ClampPositionToWater() { if (transform.position.y > waterSurfaceY) { transform.position = new Vector3(transform.position.x, waterSurfaceY, transform.position.z); } }
-    private void SetNewWanderTarget() { float x = Random.Range(-wanderAreaSize.x / 2, wanderAreaSize.x / 2) + wanderAreaCenter.x; float y = Random.Range(waterSurfaceY - wanderAreaSize.y, waterSurfaceY - 1f); float z = Random.Range(-wanderAreaSize.z / 2, wanderAreaSize.z / 2) + wanderAreaCenter.z; wanderTarget = new Vector3(x, y, z); }
-    private IEnumerator BiteCoroutine() { GameObject indicator = null; if (biteIndicatorPrefab != null) indicator = Instantiate(biteIndicatorPrefab, transform.position + Vector3.up * 1.5f, Quaternion.identity); yield return new WaitForSeconds(timeBeforeBite); if (indicator != null) Destroy(indicator); if(fishingRodController.CurrentState == FishingRodController.FishingState.WaitingForBite) { fishingRodController.StartFishFight(this); SetState(FishState.Fighting); } else { SetState(FishState.Wandering); } }
+    private void SetNewWanderTarget() 
+    { 
+        float x = Random.Range(-wanderAreaSize.x / 2, wanderAreaSize.x / 2) + wanderAreaCenter.x; 
+        float y = Random.Range(fishingRodController.waterSurfaceY - wanderAreaSize.y, fishingRodController.waterSurfaceY - 1f);
+        float z = Random.Range(-wanderAreaSize.z / 2, wanderAreaSize.z / 2) + wanderAreaCenter.z; 
+        wanderTarget = new Vector3(x, y, z); 
+    }
+    
+    private IEnumerator BiteCoroutine() 
+    { 
+        GameObject indicator = null;
+        if (biteIndicatorPrefab != null) indicator = Instantiate(biteIndicatorPrefab, transform.position + Vector3.up * 1.5f, Quaternion.identity);
+        yield return new WaitForSeconds(timeBeforeBite); 
+        if (indicator != null) Destroy(indicator);
+        if(fishingRodController.CurrentState == FishingRodController.FishingState.WaitingForBite) { fishingRodController.StartFishFight(this); SetState(FishState.Fighting); } 
+        else { SetState(FishState.Wandering); } 
+    }
     
     private void FightBehavior() 
     {
@@ -138,7 +162,7 @@ public class FishAI : MonoBehaviour
             Vector3 fromRodToFish = transform.position - rodTip.position;
             fromRodToFish.y = 0;
             Vector3 resistanceDirection = (fromRodToFish.normalized + (Vector3.down * 0.2f)).normalized;
-            rb.AddForce(resistanceDirection * fishFightPullForce, ForceMode.Acceleration);
+            rb.AddForce(resistanceDirection * fishData.pullForce, ForceMode.Acceleration);
         }
         
         if (distanceToRod > maxDistance)
@@ -156,18 +180,17 @@ public class FishAI : MonoBehaviour
     }
 
     private IEnumerator CooldownCoroutine() { yield return new WaitForSeconds(3f); SetState(FishState.Wandering); }
+    
     public void ResetFishState() { StopAllCoroutines(); rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero; SetState(FishState.Wandering); }
     
     public void DisableAI(bool isDisabled)
     {
-        if(isDisabled)
-        {
-            SetState(FishState.Disabled);
-        }
-        else
-        {
-            rb.isKinematic = false;
-            SetState(FishState.Wandering);
-        }
+        if(isDisabled) { SetState(FishState.Disabled); }
+        else { rb.isKinematic = false; SetState(FishState.Wandering); }
+    }
+    
+    public FishData GetFishData()
+    {
+        return fishData;
     }
 }
